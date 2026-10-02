@@ -1,6 +1,6 @@
 ---
 name: app-store-submission-blockers-skill
-description: Diagnose and clear App Store and Google Play submission blockers using the provider's own records instead of agent summaries. Use when an app is rejected, stuck in review for days or weeks, claimed as submitted but unproven, blocked by metadata, IAP, privacy or reviewer-access gates, or when repeated build swaps keep restarting the review clock.
+description: Diagnose and clear App Store and Google Play submission and purchasability blockers using the provider's own records instead of agent summaries. Use when an app is rejected, stuck in review for days or weeks, claimed as submitted but unproven, blocked by metadata, IAP, privacy or reviewer-access gates, when repeated build swaps keep restarting the review clock, or when products are approved but nobody can actually buy them (unsubmitted IAPs, offering wiring, regional availability, test-versus-production purchase evidence).
 ---
 
 # App Store Submission Blockers Skill
@@ -21,6 +21,9 @@ Never treat an agent summary, a CI badge, or a TestFlight email as proof that a 
 - Verdicts and issue notices arrive by email, not through the API. Read the mailbox before concluding that the provider is slow.
 - Timestamps decide the story. Resolve the current submission's submittedDate before describing how long something has "waited".
 - Label every fact: [API-verified], [recorded in a source], [inferred]. Never present a summary as a provider read.
+- Configuration is not a completed purchase. A verified product catalog, an active offering, and a rendering checkout page are not revenue; only a store transaction with a matching receipt is.
+- A store test purchase sheet proves nothing about production charging: it comes from development, TestFlight or sandbox installs, and a local StoreKit test configuration in the run scheme produces the same sheet.
+- Compare the installed build against the public store version before interpreting any on-device behavior; a developer build behaves differently from the store build.
 
 ## Step 1 — Read the provider's own records (read-only first)
 
@@ -90,6 +93,33 @@ Report per platform: candidate version and build, submission id, state, submitte
 
 Verify before closing: the submission id you quote exists and matches the app version you name; the products you list are the ones attached to that submission; the public store lookup matches the claim about whether the app has ever been live; and no submission, cancellation, or release setting was changed unless the task asked for it.
 
+## Step 6 - Purchase and product blockers (IAP, subscriptions, availability)
+
+Approved products that nobody can buy look exactly like a demand problem. These are the blockers seen in practice, with the record that proves each one.
+
+```bash
+# Purchase SDK catalog (RevenueCat v2 REST shape): which offering can the app request, and what is attached to it
+curl -s -H "Authorization: Bearer $REVENUECAT_SECRET_KEY" \
+  "https://api.revenuecat.com/v2/projects/$REVENUECAT_PROJECT_ID/offerings" | jq .
+curl -s -H "Authorization: Bearer $REVENUECAT_SECRET_KEY" \
+  "https://api.revenuecat.com/v2/projects/$REVENUECAT_PROJECT_ID/products" | jq .
+# Confirm the current endpoint shape against the provider docs; a healthy catalog is not a completed purchase.
+```
+
+1. First in-app purchase cannot be submitted on its own. The first product of each type must go out with a new app version; a standalone attempt fails with an error such as "InAppPurchase has no pending version for submission". Fix: attach the products to the next app version and submit that version.
+2. Products that were never submitted are not purchasable. A product sitting in READY_TO_SUBMIT, or the Play equivalent, cannot be bought regardless of app review state. Check each product own state, not just the app state.
+3. Incomplete commercial agreements. An unsigned Paid Applications Agreement, or unfinished banking and tax details, blocks every in-app purchase even when the app is already live.
+4. Products attached to a draft that was never sent. A submission in READY_FOR_REVIEW with no submission date means review has not started; the remaining action is to send it, or to attach the newer build first.
+5. Offering and entitlement wiring. A current offering may contain only part of the catalog, and a non-current offering is not shown by a default paywall. The app may also already request a non-current offering by identifier, so the current flag alone is not the diagnosis: check the offering the app actually requests, its packages, and the products attached to each package.
+6. Catalog drift is not store truth. Null durations or stale price labels in the purchase SDK do not prove the store product lacks a period or a price. Read the store own product records.
+7. Regional availability. Products can be live but enabled in one country only, which reads as "purchases are broken" everywhere else. Verify territories per product and per base plan, including future-region availability.
+8. Store API migrations. A legacy product endpoint can fail with a migration notice such as "Please migrate to the new publishing API" while the catalog is healthy; use the current endpoint before concluding anything is broken. Converted prices can be rejected, in which case use the store stated maximum for that region.
+9. Delivery confirmation. Grant the entitlement against the matching store transaction, and never show success before the balance or entitlement actually changes.
+10. Web billing routing. A purchase SDK web billing is not a working web checkout. Confirm what the live checkout really uses, remove silent fallbacks to a different rail, and never describe automatic renewal on a page whose rail only takes one-time payments.
+11. Test-versus-production evidence. Sandbox sheets, local StoreKit configurations, and a paywall showing one currency while the store sheet shows another are all test-environment behavior. Production proof requires the public store build installed from the store.
+12. QA hygiene. Cancel unpaid test orders and verify balances are unchanged; they are neither revenue nor purchase evidence.
+13. A claimed device or console blocker is often recoverable. Re-check device pairing and console access before declaring verification impossible.
+
 ## Hard rules
 
 - No claim of "submitted" without a submission id and timestamp.
@@ -98,6 +128,8 @@ Verify before closing: the submission id you quote exists and matches the app ve
 - Never overwrite a working release configuration to fix a symptom; fix the cause.
 - One submission owner per app; background agents must not race each other into the queue.
 - Distinguish what was verified this session from what is only recorded in a document.
+- Configuration is not revenue: a healthy catalog, an active offering, and a rendering checkout page are not a completed purchase.
+- Never claim a purchase flow works without a store transaction receipt that matches the granted entitlement.
 
 ## Required environment variable names
 
@@ -105,4 +137,5 @@ Use the existing global environment first, including ~/.env, instead of hardcodi
 
 - ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, ASC_APP_ID, ASC_BUNDLE_ID for App Store Connect API reads.
 - PLAY_PACKAGE_NAME, PLAY_SERVICE_ACCOUNT_JSON for Google Play reads.
+- REVENUECAT_PROJECT_ID, REVENUECAT_SECRET_KEY for purchase-SDK catalog reads (offerings, packages, products).
 - Mailbox access for verdict and issue emails, through the agent's connected mail surface rather than browser automation.
