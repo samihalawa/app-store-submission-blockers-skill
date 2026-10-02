@@ -1,0 +1,4 @@
+interface:
+  display_name: "App Store Submission Blockers"
+  short_description: "Prove the real review state, name the blocker class, fix it, and stop submission churn"
+  default_prompt: "Use $app-store-submission-blockers-skill to read the provider's own records for this app, prove the current submission state and the real elapsed wait, identify the actual blocker class (metadata, IAP, privacy, reviewer access, automation false success, or submission churn), fix it, and report per-platform state with evidence labels instead of trusting agent summaries."
